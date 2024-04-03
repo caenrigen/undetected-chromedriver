@@ -409,9 +409,6 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
 
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--start-maximized")
-        options.add_argument("--no-sandbox")
-        # fixes "could not connect to chrome" error when running
-        # on linux using privileged user like root (which i don't recommend)
 
         options.add_argument(
             "--log-level=%d" % log_level
@@ -460,7 +457,12 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
 
 
         service = selenium.webdriver.chromium.service.ChromiumService(
-            self.patcher.executable_path
+            self.patcher.executable_path,
+            # Ensure the service is not killed when the process group of the python
+            # kernel receives an interrupt (INT) signal (aka ctrl+c).
+            # Specially annoying in JupyterLab and alike that send the interrupt signal
+            # to the entire process group.
+            popen_kw={} if use_subprocess else {"preexec_fn": os.setsid},
         )
 
         super(Chrome, self).__init__(
@@ -763,7 +765,15 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
 
     def quit(self):
         try:
+            try:
+                self.service.stop()
+            except Exception as e:
+                logger.debug(e)
             self.service.process.kill()
+            try:
+                self.command_executor.close()
+            except Exception as e:
+                logger.debug(e)
             logger.debug("webdriver process ended")
         except (AttributeError, RuntimeError, OSError):
             pass
